@@ -1,0 +1,147 @@
+openapi: 3.1.0
+info:
+  title: Gewerbe-Anmelden API
+  version: 0.1.0
+  description: |
+    Zentrale Schnittstelle für alle Frontends. Beträge in Cent.
+    Öffentliche Endpunkte: Header `X-Api-Key` (pro Frontend).
+    Zugriff auf einen Antrag: zusätzlich `X-Application-Token` (bei Anlage einmalig ausgegeben).
+    Admin: `Authorization: Bearer <ADMIN_TOKEN>`.
+servers:
+  - url: http://localhost:8787/v1
+components:
+  securitySchemes:
+    apiKey: { type: apiKey, in: header, name: X-Api-Key }
+    appToken: { type: apiKey, in: header, name: X-Application-Token }
+    admin: { type: http, scheme: bearer }
+  schemas:
+    Quote:
+      type: object
+      description: Nur Admin-API – vollständige Aufschlüsselung
+      properties:
+        percent: { type: number }
+        feeMode: { type: string, enum: [included, direct] }
+        officeFeeCents: { type: integer }
+        serviceFeeCents: { type: integer, description: brutto inkl. 19 % USt }
+        serviceFeeNetCents: { type: integer }
+        serviceFeeVatCents: { type: integer }
+        totalDueCents: { type: integer, description: Betrag, der bei uns gezahlt wird }
+        totalCostCents: { type: integer, description: Gesamtkosten inkl. Amtsgebühr }
+    Price:
+      type: object
+      description: Kundensicht – nur Gesamtpreis, keine Aufschlüsselung
+      properties:
+        currency: { type: string }
+        totalCents: { type: integer, description: Gesamtpreis inkl. USt. und (im Modus included) Amtsgebühr }
+        officeFeeBilledSeparately: { type: boolean }
+    City:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        state: { type: string }
+        zipRanges: { type: array, items: { type: array, items: { type: string } } }
+        authorityName: { type: string }
+        channel: { type: string, enum: [email, postal, fax, portal, xgewerbe] }
+        price: { $ref: '#/components/schemas/Price' }
+    ApplicationData:
+      type: object
+      description: Siehe packages/core/src/schema.js (applicationSchema) – identisch im Frontend nutzbar
+      properties:
+        business: { type: object }
+        person: { type: object }
+        consent: { type: object }
+security: [{ apiKey: [] }]
+paths:
+  /cities:
+    get:
+      summary: Aktive Städte mit Preis (Suche nach Name oder PLZ)
+      parameters: [{ in: query, name: q, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+  /cities/resolve:
+    get:
+      summary: Zuständige Stadt zur PLZ der Betriebsstätte
+      parameters: [{ in: query, name: zip, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK }, '404': { description: PLZ nicht abgedeckt } }
+  /cities/{id}:
+    get:
+      summary: Einzelne Stadt mit Preis
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+  /comparison:
+    get:
+      summary: Anbietervergleich (unser Preis je Stadt bzw. "ab"-Preis, gepflegte Wettbewerberdaten mit Prüfdatum und Quelle)
+      parameters: [{ in: query, name: cityId, schema: { type: string } }]
+      responses: { '200': { description: OK } }
+  /applications:
+    post:
+      summary: Antrag (Entwurf) anlegen
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { cityId: { type: string }, data: { $ref: '#/components/schemas/ApplicationData' } } }
+      responses: { '201': { description: 'id, ref, accessToken, price' } }
+  /applications/{id}:
+    get:
+      summary: Antrag mit Status, Fortschritt und Zeitleiste
+      security: [{ apiKey: [], appToken: [] }]
+      responses: { '200': { description: OK } }
+    patch:
+      summary: Entwurf ergänzen (tiefe Zusammenführung von data)
+      security: [{ apiKey: [], appToken: [] }]
+      responses: { '200': { description: OK }, '409': { description: Antrag gesperrt } }
+  /applications/{id}/documents:
+    post:
+      summary: Dokument hochladen (id_front, id_back, signature, permit, register_extract, other)
+      security: [{ apiKey: [], appToken: [] }]
+      requestBody:
+        content:
+          multipart/form-data:
+            schema: { type: object, properties: { kind: { type: string }, file: { type: string, format: binary } } }
+      responses: { '201': { description: OK } }
+  /applications/{id}/submit:
+    post:
+      summary: Verbindlich absenden – prüft Vollständigkeit, schreibt Preis fest, startet Zahlung
+      security: [{ apiKey: [], appToken: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { returnUrl: { type: string } } }
+      responses:
+        '200': { description: 'checkoutUrl (null im Testmodus), status, price' }
+        '422': { description: Validierungsfehler oder fehlende Dokumente }
+  /webhooks/stripe:
+    post: { summary: Zahlungsbestätigung von Stripe, security: [], responses: { '200': { description: OK } } }
+  /admin/settings:
+    get: { summary: Globale Preis-Einstellungen, security: [{ admin: [] }], responses: { '200': { description: OK } } }
+    put: { summary: 'defaultPercent, rounding (cent|x90|euro), defaultFeeMode, competitors[]', security: [{ admin: [] }], responses: { '200': { description: OK } } }
+  /admin/cities:
+    get: { summary: Alle Städte inkl. Konfiguration und berechnetem Preis, security: [{ admin: [] }], responses: { '200': { description: OK } } }
+  /admin/cities/{id}:
+    put: { summary: Stadt anlegen/ändern (Amtsgebühr, Prozent, Kanal, Empfänger), security: [{ admin: [] }], responses: { '200': { description: OK } } }
+    delete: { summary: Stadt löschen, security: [{ admin: [] }], responses: { '204': { description: OK } } }
+  /admin/cities/bulk:
+    post: { summary: 'Prozentsatz/Gebührenmodus für mehrere Städte setzen', security: [{ admin: [] }], responses: { '200': { description: OK } } }
+  /admin/applications:
+    get: { summary: Anträge filtern (status, cityId), security: [{ admin: [] }], responses: { '200': { description: OK } } }
+  /admin/applications/{id}:
+    get: { summary: Antrag mit Dokumenten und Audit-Log, security: [{ admin: [] }], responses: { '200': { description: OK } } }
+  /admin/applications/{id}/approve:
+    post: { summary: Prüfung bestanden – Übermittlung einreihen, security: [{ admin: [] }], responses: { '200': { description: OK } } }
+  /admin/applications/{id}/request-info:
+    post: { summary: Rückfrage an Kunden, security: [{ admin: [] }], responses: { '200': { description: OK } } }
+  /admin/applications/{id}/status:
+    post: { summary: 'Antwort des Amts erfassen (acknowledged, completed, rejected, transmitted)', security: [{ admin: [] }], responses: { '200': { description: OK } } }
+  /admin/applications/{id}/retransmit:
+    post: { summary: Übermittlung erneut anstoßen, security: [{ admin: [] }], responses: { '200': { description: OK } } }
+  /admin/applications/{id}/packet.pdf:
+    get: { summary: Erzeugtes Einreichungspaket, security: [{ admin: [] }], responses: { '200': { description: PDF } } }
+  /admin/documents/{docId}:
+    get: { summary: Dokument entschlüsselt abrufen, security: [{ admin: [] }], responses: { '200': { description: Datei } } }
+  /admin/jobs:
+    get: { summary: Job-Queue (Übermittlungen, Fehler, Retries), security: [{ admin: [] }], responses: { '200': { description: OK } } }
+  /admin/stats:
+    get: { summary: Kennzahlen (Anträge je Status, Umsatz Servicegebühr), security: [{ admin: [] }], responses: { '200': { description: OK } } }
+  /admin/frontends:
+    get: { summary: Registrierte Frontends, security: [{ admin: [] }], responses: { '200': { description: OK } } }
+    post: { summary: Neues Frontend mit eigenem API-Key, security: [{ admin: [] }], responses: { '201': { description: OK } } }

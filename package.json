@@ -1,0 +1,11 @@
+{
+  "name": "gewerbe-anmelden",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*", "server", "web"],
+  "scripts": {
+    "dev:server": "npm --workspace @ga/server run dev",
+    "dev:web": "npm --workspace @ga/web run dev",
+    "build:web": "npm --workspace @ga/web run build"
+  }
+}

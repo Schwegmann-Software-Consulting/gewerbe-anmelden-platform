@@ -1,0 +1,16 @@
+{
+  "name": "@ga/server",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch --env-file-if-exists=.env src/index.js",
+    "start": "node --env-file-if-exists=.env src/index.js"
+  },
+  "dependencies": {
+    "@ga/core": "*",
+    "@hono/node-server": "^1.13.7",
+    "hono": "^4.6.14",
+    "nodemailer": "^6.9.16",
+    "pdf-lib": "^1.17.1"
+  }
+}
